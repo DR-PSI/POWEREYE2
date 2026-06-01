@@ -110,7 +110,17 @@ select{background:#080c14;color:#ffd700;border:1px solid #1e3a5f;border-radius:4
 .login-err{color:#ff4444;font-size:11px;margin-top:12px;display:none;}
 .login-brand{font-size:10px;color:#5a7a9a;margin-top:20px;}
 .login-brand span{color:#ffd700;}
+
+.map-panel{background:#0f1628;border:1px solid #1e3a5f;border-radius:8px;padding:12px;margin-bottom:10px;}
+#mapid{height:320px;border-radius:6px;border:1px solid #1e3a5f;}
+.leaflet-popup-content-wrapper{background:#0f1628;border:1px solid #ffd700;color:#c8d8e8;border-radius:8px;}
+.leaflet-popup-tip{background:#0f1628;}
+.map-legend{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:#5a7a9a;font-family:monospace;}
+.leg-dot{width:10px;height:10px;border-radius:50%;}
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -186,6 +196,17 @@ select{background:#080c14;color:#ffd700;border:1px solid #1e3a5f;border-radius:4
         <div style="background:#080c14;border-radius:6px;height:14px;overflow:hidden"><div id="lb" style="height:100%;border-radius:6px;transition:width 1s;background:#00ff9d;width:0%"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:#5a7a9a"><span>0%</span><span id="lp" style="color:#ffd700">--</span><span>100%</span></div>
       </div>
+    </div>
+  </div>
+  <div class="map-panel">
+    <div class="ptitle">GIS MAP — REAL-TIME UNIT LOCATIONS <span id="map-updated">--</span></div>
+    <div id="mapid"></div>
+    <div class="map-legend">
+      <div class="leg-item"><div class="leg-dot" style="background:#00ff9d"></div>ปกติ</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#ff6b35"></div>Solar ผิดกฎหมาย</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#ff4444"></div>EV Inrush</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#ffd700"></div>แรงดันสูง</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#00d4ff"></div>หม้อแปลง</div>
     </div>
   </div>
   <div class="aipnl">
@@ -378,7 +399,8 @@ function renderAlerts(){
   document.getElementById('ac').textContent=alerts.length+' events';
 }
 
-function renderTLM(v,i,kw,kvar,pf,load){
+function if(houseMarkers.length) updateMapMarkers(vs,ps);
+  renderTLM(v,i,kw,kvar,pf,load){
   document.getElementById('tlm').innerHTML=
     '<div class="tlmr"><span class="tlmk">VOLTAGE (V)</span><span class="tlmv '+(v>245?'alrt':'ok')+'">'+v+' V</span></div>'+
     '<div class="tlmr"><span class="tlmk">CURRENT (I)</span><span class="tlmv blu">'+i+' A</span></div>'+
@@ -433,8 +455,80 @@ function update(){
   pc.data.datasets[0].data=pdata.slice();
   pc.data.datasets[0].backgroundColor=pdata.map(function(p){return p<0?'#ff6b35':'#00d4ff';});
   pc.update('none');
+  if(houseMarkers.length) updateMapMarkers(vs,ps);
   renderTLM(rnd(229,236),rnd(28,42).toFixed(1),rnd(6.2,9.8).toFixed(1),rnd(1.2,3.4).toFixed(1),rnd(0.88,0.97).toFixed(2),rnd(38,72));
 }
+
+
+// ============ GIS MAP ============
+var map = L.map('mapid', {
+  center: [13.7280, 100.7120],
+  zoom: 15,
+  zoomControl: true
+});
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: 'OpenStreetMap',
+  maxZoom: 19
+}).addTo(map);
+
+// Transformer marker (Tinamics location)
+var tfIcon = L.divIcon({
+  html: '<div style="background:#00d4ff;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #00d4ff;"></div>',
+  iconSize:[16,16], iconAnchor:[8,8], popupAnchor:[0,-8]
+});
+L.marker([13.7280, 100.7120], {icon:tfIcon})
+  .addTo(map)
+  .bindPopup('<b style="color:#ffd700">หม้อแปลง TF-001</b><br>Tinamics Area<br>MEA TLM: ONLINE');
+
+// 10 house locations around Saphan Sung
+var HOUSE_COORDS = [
+  [13.7295, 100.7105], [13.7310, 100.7135],
+  [13.7265, 100.7148], [13.7250, 100.7112],
+  [13.7285, 100.7160], [13.7300, 100.7090],
+  [13.7320, 100.7115], [13.7240, 100.7130],
+  [13.7275, 100.7075], [13.7315, 100.7155]
+];
+
+var houseMarkers = [];
+
+function getMarkerColor(s){
+  if(s==='solar') return '#ff6b35';
+  if(s==='ev')    return '#ff4444';
+  if(s==='high')  return '#ffd700';
+  return '#00ff9d';
+}
+
+function initMapMarkers(){
+  HOUSE_COORDS.forEach(function(coord, i){
+    var icon = L.divIcon({
+      html: '<div id="mpin'+i+'" style="background:#00ff9d;width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px #00ff9d;"></div>',
+      iconSize:[12,12], iconAnchor:[6,6], popupAnchor:[0,-8]
+    });
+    var m = L.marker(coord, {icon:icon}).addTo(map);
+    m.bindPopup('<b style="color:#ffd700">'+UNITS[i].id+'</b><br><span id="mpop'+i+'">Loading...</span>');
+    houseMarkers.push(m);
+  });
+}
+
+function updateMapMarkers(vs, ps){
+  document.getElementById('map-updated').textContent = new Date().toTimeString().slice(0,8);
+  HOUSE_COORDS.forEach(function(coord, i){
+    var s = state(vs[i], ps[i]);
+    var col = getMarkerColor(s);
+    var pin = document.getElementById('mpin'+i);
+    if(pin){
+      pin.style.background = col;
+      pin.style.boxShadow = '0 0 8px '+col;
+    }
+    var pop = document.getElementById('mpop'+i);
+    if(pop){
+      pop.innerHTML = 'V: <b style="color:'+col+'">'+vs[i]+'V</b><br>P: '+(ps[i]>0?'+':'')+ps[i]+' kW<br>Status: <b style="color:'+col+'">'+(s==='solar'?'SOLAR':s==='ev'?'EV':s==='high'?'HIGH V':'OK')+'</b>';
+    }
+  });
+}
+
+setTimeout(initMapMarkers, 500);
 
 function logout(){
   apiKey='';
